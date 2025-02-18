@@ -1,0 +1,100 @@
+import cv2
+import mediapipe as mp
+import imutils
+from pynput.keyboard import Key, Controller
+import time
+
+cap = cv2.VideoCapture(0)  # Initialize the video capture object for the default camera.
+
+mp_drawing = mp.solutions.drawing_utils
+
+# Fetching hand models.
+mp_hands = mp.solutions.hands
+hands = mp_hands.Hands()
+
+# Constants
+MFINGER_INDEX = 11
+SENSITIVITY = 0.5
+SKIP_FRAMES = 2  # Define the number of frames to skip
+
+# Nitro key
+NITRO_KEY = 'n'  # Change this to the desired key for nitro
+
+keyboard = Controller()  # Define the keyboard controller object
+
+# Used for FPS calculations.
+def steering_wheel():
+    prev_frame_time = 0
+    new_frame_time = 0
+    frame_count = 0
+
+    while cap.isOpened():
+        success, img = cap.read()
+        frame_count += 1
+
+        if frame_count % SKIP_FRAMES != 0:
+            continue
+
+        if not success:
+            break
+
+        cv2.waitKey(1)  # Continuously refreshes the webcam frame every 1ms.
+        img = imutils.rotate(img, angle=0)  # Flipping horizontally
+        img.flags.writeable = False  # Making the images not writeable for optimization.
+        results = hands.process(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))  # Processing video.
+
+        # ... (rest of your code)
+        landmarks = results.multi_hand_landmarks  # Fetches all the landmarks (points) on the hand.
+        if landmarks:
+            # When a hand exists in the frame.
+            new_frame_time = time.time()
+            fps = str(int(1 / (new_frame_time - prev_frame_time)))
+            img = write_text(img, fps, 150, 20)
+            prev_frame_time = new_frame_time
+
+            if len(landmarks) == 2:  # If 2 hands are in view.
+                left_hand_landmarks = landmarks[1].landmark
+                right_hand_landmarks = landmarks[0].landmark
+
+                shape = img.shape
+                width = shape[1]
+                height = shape[0]
+
+                left_mFingerX, left_mFingerY = (left_hand_landmarks[MFINGER_INDEX].x * width), (
+                        left_hand_landmarks[MFINGER_INDEX].y * height)
+                right_mFingerX, right_mFingerY = (right_hand_landmarks[MFINGER_INDEX].x * width), (
+                        right_hand_landmarks[MFINGER_INDEX].y * height)
+
+                slope = ((right_mFingerY - left_mFingerY) / (right_mFingerX - left_mFingerX))
+
+                print(f"Slope: {slope}")
+
+                if abs(slope) > SENSITIVITY:
+                    if slope > 0:  # Change condition for right turn
+                        print("Turn right.")
+                        keyboard.release('d')
+                        keyboard.press('a')
+                    elif slope < 0:  # Change condition for left turn
+                        print("Turn left.")
+                        keyboard.release('a')
+                        keyboard.press('d')
+                else:
+                    print("Keeping straight.")
+                    keyboard.release('a')
+                    keyboard.release('d')
+                    keyboard.press('w')
+
+                # Check for nitro condition (example: when right hand moves up)
+                if right_hand_landmarks[MFINGER_INDEX].y < left_hand_landmarks[MFINGER_INDEX].y:
+                    print("Activate Nitro!")
+                    keyboard.press(NITRO_KEY)
+                else:
+                    keyboard.release(NITRO_KEY)
+
+            for hand_landmarks in landmarks:
+                mp_drawing.draw_landmarks(img, hand_landmarks, mp_hands.HAND_CONNECTIONS)
+
+        cv2.imshow("Hand Recognition", img)
+
+    cap.release()
+    cv2.destroyAllWindows()
